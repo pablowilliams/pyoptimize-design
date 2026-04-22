@@ -69,6 +69,8 @@ The architecture is shaped by four principles. First, deterministic-before-proba
 
 The system is a seven-stage pipeline. Source code enters the pipeline through an ingestion stage, flows through parallel static-analysis and profiling stages, merges in a signal-fusion stage that ranks candidate findings, proceeds to a language-model reasoning stage that produces rewrites, passes through a rewrite engine that ensures syntactic and structural safety, and finally reaches a verifier that confirms behavioural equivalence and measures impact. The output is written to a report generator and persisted to a data store that the dashboard reads from.
 
+[FIGURE:pipeline]
+
 ### 3.3 Component Responsibilities
 
 The ingestion stage is responsible for locating source files, parsing them with LibCST, and optionally exercising them through a user-supplied entry point to produce runtime profiles. The static analyser owns a plugin-based catalogue of pattern detectors, each of which returns a structured finding with a location, a pattern identifier, and a confidence score. The profiler integration normalises output from cProfile and scalene into a uniform per-line cost dictionary keyed by file path and line number. Signal fusion combines static findings with runtime costs into a prioritised candidate list, using a scoring function described in section 4.4. The language-model reasoner classifies each candidate as genuine or a false positive, explains the optimization in plain language, and proposes a rewrite as a structured diff. The rewrite engine applies the proposed diff through LibCST codemods, preserving formatting and comments, and runs a set of structural safety checks. The verifier executes the project's test suite against the rewritten code, supplements it with property-based tests where coverage is absent, and runs micro-benchmarks to measure speedup and memory impact. The reporting subsystem renders findings to an academic PDF report and writes structured records to the dashboard data store.
@@ -97,6 +99,8 @@ Profiler integration is optional but strongly recommended. The component support
 
 Signal fusion takes the list of Findings and the cost map and produces a prioritised candidate list. The priority score for a finding is the product of three factors. The first factor is the pattern confidence reported by the detector. The second factor is the logarithm of the runtime share attributable to the finding's lines, defaulting to a small constant when no profile data is available. The third factor is a coverage multiplier that rewards findings in regions covered by the project's existing tests, because those regions are safer to rewrite. Findings below a configurable minimum score are dropped. This stage exists to prevent the tool from spending tokens asking a language model to optimise cold code, which is a common failure mode of naive LLM-first approaches.
 
+[FIGURE:priority]
+
 ### 4.5 Language-Model Reasoner
 
 The reasoner communicates with an Anthropic API endpoint, currently targeting Claude Sonnet 4.6, through two calls per finding. The first call is a classification call: the model receives the finding, the surrounding context, the pattern description, and the profile data, and returns a structured response with fields for validity, rationale, estimated speedup category, and any prerequisites for the rewrite. The second call, conditional on the first, is a generation call: the model receives the same context and is asked to produce a minimal rewrite as a unified diff, constrained to preserve the function signature, module-level names, and behaviour. Both calls use structured-output schemas so that parsing does not rely on freeform text. Prompt caching is enabled on the system prompt and pattern catalogue to keep cost per finding low when the same run covers many files.
@@ -108,6 +112,8 @@ The rewrite engine is the safety layer between a language-model suggestion and t
 ### 4.7 Verifier
 
 The verifier is the most consequential component in the pipeline, because it is the one that decides whether a suggestion is surfaced to the user. Verification proceeds in three phases. The first phase is correctness: the project's existing pytest suite is run against the rewritten source. If no tests exist for the affected function, Hypothesis is used to generate property-based tests from the function signature, using type hints when available and shallow strategies when not. The second phase is performance: pytest-benchmark is used to measure execution time on representative inputs, and memory_profiler is used to measure peak memory. The benchmark inputs are drawn from the profiler's recorded call arguments when available and from Hypothesis strategies otherwise. The third phase is decision: a suggestion is accepted only if all tests pass, the runtime improvement is at least ten percent on the measured inputs, and the memory footprint is not materially worse. Accepted suggestions are recorded with full measurement data. Rejected suggestions are recorded with the reason so that the reporter can surface near-misses.
+
+[FIGURE:verifier]
 
 ### 4.8 Reporting Subsystem
 
@@ -124,6 +130,8 @@ The PDF report is the archival artefact; the dashboard is the operational one. A
 ### 5.2 Views
 
 The dashboard ships with five views. The Overview view shows the most recent run with a headline number for total accepted speedup, a distribution of findings by pattern, and a list of highest-impact suggestions. The Findings view is a filterable table with one row per finding, sortable by severity, runtime share, pattern, and file. The Suggestion Detail view shows the full before-and-after diff for a single suggestion, with benchmark results, memory measurements, and the rationale produced by the reasoner. The History view plots aggregate run metrics over time, including total findings, total accepted speedup, and coverage of the project by the detector set. The Settings view exposes the pattern catalogue with per-pattern enable and disable toggles, the minimum priority threshold, and the model selection.
+
+[FIGURE:dashboard]
 
 ### 5.3 Technical Stack
 
@@ -144,6 +152,8 @@ Evaluation is built into the project from day one rather than deferred. Three da
 ## 7. Implementation Roadmap
 
 Week one is dedicated to the deterministic core. The ingestion stage, static-analyser framework, and the first five pattern detectors are implemented. A minimal command-line entry point prints findings to the terminal. No language model is involved yet; the goal is to prove the static-analysis spine is reliable. Week two adds the reasoner and the rewrite engine. Structured-output prompts are written, the two-call reasoning pattern is wired up, and LibCST codemods applied. The verifier is introduced in skeletal form, running only the existing test suite without property-based augmentation. Week three adds profiler integration, signal fusion, property-based test generation, and the reporting subsystem, producing the first end-to-end run that yields an academic PDF. Week four is the dashboard week: the Next.js application is built, the database schema is finalised, and the five views are implemented. A stretch goal for week five is fine-tuning a small model on accepted suggestion data, but this is explicitly outside the critical path. Each week ends with a checkpoint: a tagged release, an updated README, and a re-run of the evaluation suite.
+
+[FIGURE:roadmap]
 
 ---
 
@@ -209,6 +219,8 @@ This catalogue is a starting point. The detector framework is designed so that a
 The dashboard and the reporting subsystem share a single data model, described here in schema-level prose rather than code.
 
 A Run record contains a run identifier, a start and end timestamp, the target path, the tool version, the model identifier used for reasoning, and a configuration hash. A Finding record references its parent Run, and contains a finding identifier, a file path, a start and end line, a pattern identifier, a confidence score, a context window, and a priority score produced by signal fusion. A Suggestion record references its parent Finding, and contains a suggestion identifier, the proposed unified diff, the rationale text produced by the reasoner, and a status field with one of four values: accepted, rejected-behaviour, rejected-performance, or rejected-structural. A Measurement record references its parent Suggestion and contains runtime before and after, memory before and after, benchmark identifiers, and the wallclock measurement timestamps. These four tables are sufficient to reproduce every view in the dashboard and every section in the generated PDF.
+
+[FIGURE:data_model]
 
 ---
 

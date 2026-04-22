@@ -12,6 +12,7 @@ from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import inch
 from reportlab.platypus import (
     HRFlowable,
+    KeepTogether,
     ListFlowable,
     ListItem,
     PageBreak,
@@ -20,6 +21,8 @@ from reportlab.platypus import (
     Spacer,
 )
 from reportlab.platypus.tableofcontents import TableOfContents
+
+from figures import FIGURES
 
 HERE = Path(__file__).resolve().parent
 SRC = HERE / "report.md"
@@ -308,6 +311,20 @@ def build_story(md_path: Path, styles: dict[str, ParagraphStyle]) -> list:
             continue
         if stripped.startswith("# "):
             emit_heading(1, stripped[2:].strip())
+            idx += 1
+            continue
+
+        if stripped.startswith("[FIGURE:") and stripped.endswith("]"):
+            flush_paragraph()
+            flush_bullets()
+            key = stripped[len("[FIGURE:") : -1].strip()
+            factory = FIGURES.get(key)
+            if factory is not None:
+                drawing = factory()
+                drawing.hAlign = "CENTER"
+                story.append(Spacer(1, 8))
+                story.append(KeepTogether(drawing))
+                story.append(Spacer(1, 10))
             idx += 1
             continue
 
