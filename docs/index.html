@@ -8,6 +8,7 @@
       name="description"
       content="Upload a PDF containing Python code and receive a quality score with flagged sections. Runs entirely in your browser."
     />
+    <meta name="color-scheme" content="light dark" />
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
@@ -15,7 +16,11 @@
 
     <header class="site-header">
       <div class="site-header__inner">
-        <h1 class="site-title">PyOptimize — Code Quality Scorer</h1>
+        <h1 class="site-title">
+          <span class="site-title__mark">PyOptimize</span>
+          <span aria-hidden="true"> — </span>
+          <span>Code Quality Scorer</span>
+        </h1>
         <button
           id="theme-toggle"
           class="theme-toggle"
@@ -28,18 +33,31 @@
       </div>
     </header>
 
+    <section class="hero" aria-labelledby="hero-h">
+      <div class="hero__inner">
+        <span class="hero__eyebrow">PyOptimize · Design Prototype</span>
+        <h2 id="hero-h" class="hero__title">
+          Quantify the performance quality of your Python, instantly.
+        </h2>
+        <p class="hero__lede">
+          Upload a PDF containing Python source code and receive a grade, a
+          detailed breakdown of anti-patterns, and inline highlights over the
+          extracted text. Analysis runs entirely in your browser.
+        </p>
+      </div>
+    </section>
+
     <main id="main" class="site-main" tabindex="-1">
       <section class="panel upload-panel" aria-labelledby="upload-h">
-        <h2 id="upload-h">Upload PDF</h2>
+        <h2 id="upload-h">Upload a PDF</h2>
         <p class="lede">
-          Upload a PDF that contains Python code. The file is analysed entirely in
-          your browser; it is never uploaded to a server. Results include a 0–100
-          quality score, a letter grade, and inline highlighting of every flagged
-          line.
+          We extract selectable text from your PDF and score it against a rule
+          catalogue ported from the PyOptimize design report. Nothing leaves
+          this page.
         </p>
         <div class="upload-row">
           <label for="pdf-upload" class="upload-label">
-            <span class="upload-label__text">Select a PDF containing Python code</span>
+            Select a PDF containing Python code
           </label>
           <input
             id="pdf-upload"
@@ -49,8 +67,8 @@
             aria-describedby="upload-hint"
           />
           <span id="upload-hint" class="upload-hint">
-            Accepted format: PDF. Scanned image-only PDFs are not supported because
-            they contain no selectable text.
+            Accepted format: PDF. Scanned image-only PDFs are not supported
+            because they contain no selectable text.
           </span>
           <button
             id="reset-btn"
@@ -79,12 +97,54 @@
         hidden
       >
         <h2 id="results-h" tabindex="-1">Results</h2>
+
         <div class="score-card" id="score-card">
-          <div class="score-card__value">
-            <span class="score-card__label">Score</span>
-            <span class="score-card__number" id="score-number">—</span>
-            <span class="score-card__out-of">/ 100</span>
+          <div class="score-card__ring" aria-hidden="true">
+            <svg viewBox="0 0 120 120">
+              <defs>
+                <linearGradient
+                  id="scoreGradient"
+                  x1="0%"
+                  y1="0%"
+                  x2="100%"
+                  y2="100%"
+                >
+                  <stop offset="0%" stop-color="#1e2a8a" />
+                  <stop offset="55%" stop-color="#4a1fb0" />
+                  <stop offset="100%" stop-color="#7a1fa2" />
+                </linearGradient>
+              </defs>
+              <circle
+                class="ring-bg"
+                cx="60"
+                cy="60"
+                r="52"
+                fill="none"
+                stroke-width="10"
+              />
+              <circle
+                id="ring-fg"
+                class="ring-fg"
+                cx="60"
+                cy="60"
+                r="52"
+                fill="none"
+                stroke-width="10"
+                stroke-dasharray="326.73"
+                stroke-dashoffset="326.73"
+              />
+            </svg>
+            <div class="score-card__ring-text">
+              <span class="score-card__number" id="score-number">—</span>
+              <span class="score-card__out-of">/ 100</span>
+            </div>
           </div>
+
+          <div class="score-card__meta">
+            <span class="score-card__label">Quality assessment</span>
+            <p class="score-card__title" id="score-title">Awaiting upload</p>
+          </div>
+
           <div class="grade-badge" id="grade-badge" data-grade="pending">
             <svg
               class="grade-badge__glyph"
@@ -92,7 +152,7 @@
               aria-hidden="true"
               focusable="false"
             >
-              <circle cx="12" cy="12" r="10" fill="currentColor" opacity="0.12" />
+              <circle cx="12" cy="12" r="10" fill="currentColor" opacity="0.18" />
               <path
                 id="grade-glyph-path"
                 d="M6 12l4 4 8-8"
@@ -106,8 +166,14 @@
             <span class="grade-badge__letter" id="grade-letter">—</span>
             <span class="grade-badge__word" id="grade-word">Awaiting upload</span>
           </div>
+
+          <p class="score-summary" id="score-summary"></p>
         </div>
-        <p class="score-summary" id="score-summary"></p>
+
+        <!-- Accessible announcement of the final numeric score. Updated once
+             by JS so screen readers get the value even when the visual ring
+             is animated. -->
+        <span class="sr-only" id="score-sr"></span>
       </section>
 
       <section
@@ -132,8 +198,9 @@
       >
         <h2 id="code-h">Extracted code</h2>
         <p class="code-hint">
-          Flagged sections are underlined and styled by severity. Activate a
-          highlighted span to open its finding details.
+          Flagged sections are underlined and styled by severity — solid for
+          low, dashed for medium, double for high. Activate a highlighted span
+          to open its finding details.
         </p>
         <pre class="code-display"><code id="code-display"></code></pre>
       </section>
@@ -142,7 +209,7 @@
     <footer class="site-footer">
       <p>
         PyOptimize is an open-source design project. Analysis runs client-side
-        using a rule set ported from the design report.
+        against a rule set ported from the design report.
         <a
           class="site-footer__link"
           href="https://github.com/pablowilliams/pyoptimize-design"

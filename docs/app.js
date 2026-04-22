@@ -157,6 +157,9 @@ const ui = {
   resultsSection: $("#results-section"),
   resultsHeading: $("#results-h"),
   scoreNumber: $("#score-number"),
+  scoreSr: $("#score-sr"),
+  scoreTitle: $("#score-title"),
+  ringFg: $("#ring-fg"),
   gradeBadge: $("#grade-badge"),
   gradeLetter: $("#grade-letter"),
   gradeWord: $("#grade-word"),
@@ -167,6 +170,8 @@ const ui = {
   codeSection: $("#code-section"),
   codeDisplay: $("#code-display"),
 };
+
+const RING_CIRCUMFERENCE = 2 * Math.PI * 52; // matches r=52 in SVG
 
 // ---------------------------------------------------------------------------
 // Theme toggle. Respects prefers-color-scheme on first load; persists choice.
@@ -345,13 +350,63 @@ function escapeHtml(s) {
     .replace(/>/g, "&gt;");
 }
 
+const prefersReducedMotion = () =>
+  window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
 function renderScore(score, grade) {
-  ui.scoreNumber.textContent = String(score);
+  // Visual elements are aria-hidden on the ring container; update them freely.
   ui.gradeBadge.dataset.grade = grade.letter;
+  ui.gradeBadge.setAttribute(
+    "aria-label",
+    `Grade ${grade.letter}, ${grade.word.toLowerCase()}`,
+  );
   ui.gradeLetter.textContent = grade.letter;
   ui.gradeWord.textContent = `${grade.letter} — ${grade.word}`;
+  ui.scoreTitle.textContent = `${grade.word} — Grade ${grade.letter}`;
   const path = GRADE_GLYPHS[grade.glyph];
   document.getElementById("grade-glyph-path").setAttribute("d", path);
+
+  // Score ring: set dashoffset so the gradient stroke fills proportionally.
+  const targetOffset =
+    RING_CIRCUMFERENCE - (Math.max(0, Math.min(100, score)) / 100) * RING_CIRCUMFERENCE;
+
+  if (prefersReducedMotion()) {
+    // Render final state immediately — no counter animation, no ring transition.
+    ui.ringFg.style.transition = "none";
+    ui.ringFg.setAttribute("stroke-dashoffset", String(targetOffset));
+    ui.scoreNumber.textContent = String(score);
+  } else {
+    // First paint: start from empty ring + 0, then flip to final in the next frame
+    // so the CSS transition on stroke-dashoffset runs.
+    ui.ringFg.style.transition = "";
+    ui.ringFg.setAttribute("stroke-dashoffset", String(RING_CIRCUMFERENCE));
+    ui.scoreNumber.textContent = "0";
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        ui.ringFg.setAttribute("stroke-dashoffset", String(targetOffset));
+        animateCounter(0, score, 700);
+      });
+    });
+  }
+
+  // One-shot accessible announcement of the final value, separate from the
+  // visual counter. This updates once and is in an sr-only span that is read
+  // by the Results heading focus + status live region.
+  ui.scoreSr.textContent = `Score ${score} out of 100`;
+}
+
+function animateCounter(from, to, durationMs) {
+  const start = performance.now();
+  const step = (now) => {
+    const t = Math.min(1, (now - start) / durationMs);
+    // Ease-out cubic
+    const eased = 1 - Math.pow(1 - t, 3);
+    const value = Math.round(from + (to - from) * eased);
+    ui.scoreNumber.textContent = String(value);
+    if (t < 1) requestAnimationFrame(step);
+    else ui.scoreNumber.textContent = String(to);
+  };
+  requestAnimationFrame(step);
 }
 
 function renderFindings(findings) {
@@ -529,6 +584,15 @@ function reset() {
   ui.resetBtn.hidden = true;
   ui.findingsList.innerHTML = "";
   ui.codeDisplay.innerHTML = "";
+  ui.scoreNumber.textContent = "—";
+  ui.scoreSr.textContent = "";
+  ui.scoreTitle.textContent = "Awaiting upload";
+  ui.gradeBadge.dataset.grade = "pending";
+  ui.gradeBadge.removeAttribute("aria-label");
+  ui.gradeLetter.textContent = "—";
+  ui.gradeWord.textContent = "Awaiting upload";
+  ui.ringFg.style.transition = "none";
+  ui.ringFg.setAttribute("stroke-dashoffset", String(RING_CIRCUMFERENCE));
   clearError();
   announce("", { state: "idle" });
   ui.fileInput.focus();
