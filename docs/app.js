@@ -26,42 +26,93 @@ pdfjsLib.GlobalWorkerOptions.workerSrc =
 // ---------------------------------------------------------------------------
 // Rule catalogue. Each rule is a regex plus metadata. Severity weights drive
 // scoring and the visual treatment (solid / dashed / double border).
+//
+// Rules are adapted from patterns detected by established Python tooling:
+//   perflint (W83xx, W84xx), ruff PERF rules, flake8-comprehensions (C4xx),
+//   refurb (FURBxxx), flake8-bugbear (B0xx), pycodestyle (E721), and pylint
+//   performance conventions. Source tools are named in each description so
+//   readers can cross-reference the original documentation.
 // ---------------------------------------------------------------------------
 const RULES = [
   {
     id: "LOOP-001",
     title: "Iteration by index where direct iteration suffices",
     description:
-      "`for i in range(len(xs))` is slower and less idiomatic than `for x in xs` or `for i, x in enumerate(xs)`.",
+      "`for i in range(len(xs))` is slower and less idiomatic than `for x in xs` or `for i, x in enumerate(xs)`. Same pattern as pylint C0200.",
     severity: "medium",
     weight: 4,
     pattern: /for\s+\w+\s+in\s+range\s*\(\s*len\s*\(/g,
   },
   {
+    id: "LOOP-002",
+    title: "try/except inside a loop",
+    description:
+      "A `try`/`except` in the loop body pays setup cost on every iteration. Move the guard around the loop, or use `contextlib.suppress`. Inspired by ruff PERF203 and perflint W8301.",
+    severity: "medium",
+    weight: 3,
+    pattern: /^\s+try\s*:\s*$/gm,
+    requiresLoopContext: true,
+  },
+  {
+    id: "LOOP-003",
+    title: "Unnecessary `list()` cast feeding an aggregator",
+    description:
+      "`sum(list(...))`, `any(list(...))`, `max(list(...))` materialise the sequence just to throw it away. Pass the generator directly. Inspired by ruff PERF101 and perflint W8401.",
+    severity: "medium",
+    weight: 2,
+    pattern: /\b(sum|any|all|min|max|sorted|set|tuple|frozenset|len|next|"\s*"\.join|'\s*'\.join)\s*\(\s*list\s*\(/g,
+  },
+  {
+    id: "LOOP-004",
+    title: "Manual list-append loop where a comprehension fits",
+    description:
+      "A `for` loop whose only body is `result.append(expr)` can usually be rewritten as `result = [expr for ... in ...]`, which is faster and reads at a glance. Inspired by ruff PERF401.",
+    severity: "low",
+    weight: 2,
+    pattern: /for\s+\w+\s+in\s+[^:\n]+:\s*\n\s+\w+\.append\s*\(/g,
+  },
+  {
     id: "LOOP-005",
     title: "String concatenation inside a loop",
     description:
-      "Repeated `s += ...` or `s = s + ...` inside a loop allocates O(n²) memory; use ''.join(...) on a list.",
+      "Repeated `s += ...` or `s = s + ...` inside a loop allocates O(n²) memory; use `''.join(...)` on a list. Same class of issue as pylint W8203.",
     severity: "high",
     weight: 6,
     pattern: /^[^\n]*\b(\w+)\s*\+=\s*(?:["'`][^"'`]*["'`])[^\n]*$/gm,
-    // Additional guard applied post-match: must be inside a for/while body.
     requiresLoopContext: true,
+  },
+  {
+    id: "LOOP-006",
+    title: "Redundant `range(0, n)`",
+    description:
+      "`range(0, n)` is equivalent to `range(n)`. The explicit zero adds noise with no effect on behaviour.",
+    severity: "low",
+    weight: 1,
+    pattern: /\brange\s*\(\s*0\s*,\s*(?!len\s*\()[\w.]+\s*\)/g,
+  },
+  {
+    id: "LOOP-007",
+    title: "Loop-invariant call to `len()` inside the loop body",
+    description:
+      "Recomputing `len(xs)` every iteration is wasteful. Bind it to a local before the loop: `n = len(xs)`.",
+    severity: "low",
+    weight: 1,
+    pattern: /while\s+\w+\s*<\s*len\s*\(/g,
   },
   {
     id: "PD-001",
     title: "Row-wise iteration over a DataFrame",
     description:
-      "`iterrows()` and `itertuples()` are typically 10-100× slower than the vectorised equivalent.",
+      "`iterrows()` and `itertuples()` are typically 10–100× slower than the vectorised equivalent. Reach for column arithmetic, `.str`, or `.map` first.",
     severity: "high",
     weight: 6,
     pattern: /\.(iterrows|itertuples)\s*\(/g,
   },
   {
     id: "PD-002",
-    title: "DataFrame .apply where a vectorised method exists",
+    title: "DataFrame `.apply(lambda ...)` where a vectorised method exists",
     description:
-      "`.apply(lambda x: ...)` over a column typically has a vectorised replacement. Check for `.str`, arithmetic, or `.map`.",
+      "`.apply(lambda x: ...)` over a column almost always has a vectorised replacement. Check for `.str`, arithmetic, `.map`, or `.where`.",
     severity: "medium",
     weight: 3,
     pattern: /\.apply\s*\(\s*lambda\b/g,
@@ -70,64 +121,202 @@ const RULES = [
     id: "PD-004",
     title: "DataFrame append or concat inside a loop",
     description:
-      "Building a DataFrame by repeated `append` / `concat` inside a loop is O(n²). Collect rows then concatenate once.",
+      "Building a DataFrame by repeated `append` / `concat` inside a loop is O(n²). Collect rows in a list, then `pd.concat` once.",
     severity: "high",
     weight: 5,
     pattern: /\b(pd\.concat|\.append)\s*\(/g,
     requiresLoopContext: true,
   },
   {
+    id: "PD-005",
+    title: "DataFrame `.loc` / `.iloc` / `.at` / `.iat` access inside a loop",
+    description:
+      "Row-by-row positional or label access in a Python loop is a common hot spot. Prefer vectorised assignment or bulk `.values` access.",
+    severity: "medium",
+    weight: 4,
+    pattern: /\b\w+\.(loc|iloc|at|iat)\s*\[/g,
+    requiresLoopContext: true,
+  },
+  {
+    id: "PD-006",
+    title: "`.groupby(...).apply(lambda ...)`",
+    description:
+      "`.apply` with a lambda on a groupby is usually slower than a named aggregation, `.agg({...})`, or a vectorised transform.",
+    severity: "medium",
+    weight: 3,
+    pattern: /\.groupby\s*\([^)]*\)\s*\.\s*apply\s*\(\s*lambda\b/g,
+  },
+  {
     id: "NP-001",
     title: "Python-level iteration over a NumPy array",
     description:
-      "Explicit `for x in numpy_array` loses NumPy's vectorised advantage. Express the operation with array ops.",
+      "Explicit `for x in numpy_array` loses NumPy's vectorised advantage. Express the operation with array ops, `np.where`, or `np.vectorize` (as a last resort).",
     severity: "medium",
     weight: 4,
     pattern: /for\s+\w+\s+in\s+np\.\w+/g,
   },
   {
     id: "DS-001",
-    title: "Membership test against a list",
+    title: "Membership test against a list literal",
     description:
-      "`x in some_list` is O(n). If `some_list` is reused, convert it to a set for O(1) lookups.",
+      "`x in some_list` is O(n). If the collection is large or reused, convert it to a set or frozenset for O(1) lookups.",
     severity: "medium",
     weight: 3,
     pattern: /\bin\s+\[[^\]]{40,}\]/g,
   },
   {
+    id: "DS-002",
+    title: "`list.count(...)` usage",
+    description:
+      "`list.count(x)` scans the whole list every call. If you count more than once, build a `collections.Counter` and read from it.",
+    severity: "low",
+    weight: 1,
+    pattern: /\b\w+\.count\s*\(\s*[^)]*\)/g,
+  },
+  {
+    id: "COMP-001",
+    title: "Generator passed to `list` / `set` / `dict` constructor",
+    description:
+      "`list(x for x in xs)` can be the comprehension `[x for x in xs]`; the same applies to `set(...)` and `dict(...)`. Inspired by flake8-comprehensions C400–C402.",
+    severity: "low",
+    weight: 2,
+    pattern: /\b(list|set|dict)\s*\(\s*(?:\w+|\([^)]+\))\s+for\s+\w+\s+in\s+/g,
+  },
+  {
+    id: "COMP-002",
+    title: "Unnecessary list literal inside `set()` / `dict()`",
+    description:
+      "`set([...])` / `dict([...])` allocates a throwaway list. Use a set/dict comprehension or a set literal instead. Inspired by flake8-comprehensions C403/C404.",
+    severity: "low",
+    weight: 2,
+    pattern: /\b(set|dict)\s*\(\s*\[/g,
+  },
+  {
+    id: "COMP-003",
+    title: "Empty collection constructor where a literal is cheaper",
+    description:
+      "`dict()`, `list()`, `tuple()` with no arguments is slower than `{}`, `[]`, `()`. Inspired by flake8-comprehensions C408.",
+    severity: "low",
+    weight: 1,
+    pattern: /\b(dict|list|tuple)\s*\(\s*\)/g,
+  },
+  {
+    id: "COMP-004",
+    title: "Redundant wrapping of an already-iterable result",
+    description:
+      "`list(sorted(...))`, `tuple(tuple(...))`, `set(set(...))` do extra work without adding value. Inspired by flake8-comprehensions C414.",
+    severity: "low",
+    weight: 1,
+    pattern: /\b(list|tuple|set)\s*\(\s*(sorted|list|tuple|set)\s*\(/g,
+  },
+  {
     id: "IO-001",
     title: "HTTP request inside a loop",
     description:
-      "`requests.get` / `requests.post` inside a loop serialises I/O. Batch, pool, or use async for concurrency.",
+      "`requests.get` / `requests.post` inside a loop serialises I/O. Batch the calls, reuse a `Session`, or use `asyncio`/`httpx` for concurrency.",
     severity: "high",
     weight: 5,
     pattern: /\brequests\.(get|post|put|delete|head|patch)\s*\(/g,
     requiresLoopContext: true,
   },
   {
+    id: "IO-002",
+    title: "File opened without a context manager",
+    description:
+      "`f = open(...)` risks leaking the file handle if an exception is raised before `close()`. Use `with open(...) as f:` instead.",
+    severity: "medium",
+    weight: 2,
+    pattern: /(?<![=!<>])=\s*\bopen\s*\(/g,
+  },
+  {
     id: "IO-003",
     title: "JSON decoding in a hot loop",
     description:
-      "`json.loads` / `json.load` in a loop with large payloads is a common hot spot. Consider streaming parsers.",
+      "`json.loads` / `json.load` in a loop with large payloads is a common hot spot. Consider `orjson`, `ujson`, or a streaming parser.",
     severity: "low",
     weight: 2,
     pattern: /\bjson\.load[s]?\s*\(/g,
     requiresLoopContext: true,
   },
   {
+    id: "RE-001",
+    title: "Regex call with a literal pattern inside a loop",
+    description:
+      "`re.search` / `re.match` cache compiled patterns, but the cache is small. For hot loops, call `re.compile(...)` once above the loop and reuse the returned object.",
+    severity: "medium",
+    weight: 3,
+    pattern: /\bre\.(match|search|findall|finditer|sub|subn|split)\s*\(\s*r?["']/g,
+    requiresLoopContext: true,
+  },
+  {
+    id: "LOG-001",
+    title: "Logging call uses f-string formatting",
+    description:
+      "f-string arguments to `logger.info(...)` are always evaluated, even when the log level is disabled. Prefer the lazy form `logger.info('msg %s', value)`. Detected by pylint W1203.",
+    severity: "medium",
+    weight: 2,
+    pattern: /\b(?:logger|logging|log|self\.logger|self\.log)\.(debug|info|warning|warn|error|critical|exception)\s*\(\s*f["']/g,
+  },
+  {
     id: "MEM-001",
     title: "List comprehension used for immediate iteration",
     description:
-      "Wrapping an iterable in `[...]` only to iterate once allocates a full list. A generator expression is cheaper.",
+      "Wrapping an iterable in `[...]` only to iterate once allocates a full list. A generator expression is cheaper for one-shot consumption.",
     severity: "low",
     weight: 1,
     pattern: /for\s+\w+\s+in\s+\[[^\[\]\n]{5,}\s+for\s+\w+\s+in\s+/g,
   },
   {
+    id: "MEM-002",
+    title: "`copy.deepcopy` inside a loop",
+    description:
+      "`deepcopy` is expensive and usually unnecessary. If you only need a shallow copy, use `.copy()` or a slice; otherwise hoist the copy out of the loop.",
+    severity: "medium",
+    weight: 3,
+    pattern: /\bcopy\.deepcopy\s*\(/g,
+    requiresLoopContext: true,
+  },
+  {
+    id: "MEM-003",
+    title: "Mutable default argument",
+    description:
+      "`def f(x=[])` or `def f(x={})` shares the default across calls, leading to subtle bugs. Use `None` as the default and assign inside the body. Detected by flake8-bugbear B006.",
+    severity: "medium",
+    weight: 3,
+    pattern: /def\s+\w+\s*\([^)]*=\s*(?:\[\s*\]|\{\s*\}|\[[^\]\n]+\]|\{[^\}\n]+\})[^)]*\)/g,
+  },
+  {
+    id: "FURB-001",
+    title: "Lambda returning attribute access",
+    description:
+      "`lambda x: x.attr` can be replaced by `operator.attrgetter('attr')`, which is faster in hot paths. Inspired by refurb FURB118.",
+    severity: "low",
+    weight: 1,
+    pattern: /\blambda\s+(\w+)\s*:\s*\1\.\w+(?!\s*\()/g,
+  },
+  {
+    id: "IMPORT-001",
+    title: "`import` statement inside a function body",
+    description:
+      "Imports inside a hot function add per-call overhead and hide dependencies. Move them to the top of the module unless there is a cycle or startup-cost reason.",
+    severity: "low",
+    weight: 1,
+    pattern: /^\s+(?:import\s+[\w.]+|from\s+[\w.]+\s+import\s+)/gm,
+  },
+  {
+    id: "GLOBAL-001",
+    title: "`global` keyword inside a function",
+    description:
+      "Reading a global is slower than a local, and writing to a global in a hot function hurts both performance and testability.",
+    severity: "low",
+    weight: 1,
+    pattern: /^\s+global\s+\w+/gm,
+  },
+  {
     id: "QUAL-001",
     title: "Redundant length check",
     description:
-      "`len(x) == 0` can be written as `not x`; `len(x) > 0` can be written as `x`.",
+      "`len(x) == 0` is `not x`; `len(x) > 0` is `x`. Detected by pylint C1801.",
     severity: "low",
     weight: 1,
     pattern: /\blen\s*\([^)]+\)\s*[=!<>]=?\s*0/g,
@@ -136,10 +325,19 @@ const RULES = [
     id: "QUAL-002",
     title: "Explicit comparison to True or False",
     description:
-      "`x == True` / `x == False` is both slower and less idiomatic than `x` / `not x`.",
+      "`x == True` / `x == False` is both slower and less idiomatic than `x` / `not x`. Detected by pylint C0121.",
     severity: "low",
     weight: 1,
     pattern: /\b==\s*(True|False)\b/g,
+  },
+  {
+    id: "QUAL-003",
+    title: "Using `type(x) == ...` instead of `isinstance`",
+    description:
+      "`type(x) == Cls` fails for subclasses and is slower than `isinstance(x, Cls)`. Detected by pycodestyle E721.",
+    severity: "low",
+    weight: 1,
+    pattern: /\btype\s*\(\s*[^)]+\)\s*(?:==|!=)\s*/g,
   },
 ];
 
@@ -440,7 +638,7 @@ function renderFindings(findings) {
       <div class="finding__head">
         <h3 class="finding__title">${escapeHtml(first.title)}</h3>
         <span class="severity-tag" data-severity="${first.severity}">${first.severity.toUpperCase()}</span>
-        <span class="finding__rule">${escapeHtml(ruleId)}</span>
+        <code class="finding__rule">${escapeHtml(ruleId)}</code>
       </div>
       <p class="finding__desc">${escapeHtml(first.description)}</p>
       <p class="finding__locations">Occurrences: ${locationLinks}</p>
@@ -548,7 +746,7 @@ async function handleFile(file) {
   ui.scoreSummary.textContent = buildSummary(score, grade, findings);
 
   announce(
-    `Analysis complete. Score ${score} out of 100, grade ${grade.letter} (${grade.word}). ${findings.length} ${findings.length === 1 ? "finding" : "findings"} detected.`,
+    `Analysis complete. Score ${score} out of 100, grade ${grade.letter} (${grade.word}). ${summariseFindings(findings)}`,
     { state: "idle" },
   );
 
@@ -568,6 +766,20 @@ function buildSummary(score, grade, findings) {
   if (counts.medium) parts.push(`${counts.medium} medium`);
   if (counts.low) parts.push(`${counts.low} low`);
   return `${findings.length} findings — ${parts.join(", ")} severity. Review each finding below and the highlighted sections in the extracted code.`;
+}
+
+function summariseFindings(findings) {
+  if (findings.length === 0) {
+    return "No anti-patterns detected.";
+  }
+  const counts = { high: 0, medium: 0, low: 0 };
+  for (const f of findings) counts[f.severity]++;
+  const parts = [];
+  if (counts.high) parts.push(`${counts.high} high`);
+  if (counts.medium) parts.push(`${counts.medium} medium`);
+  if (counts.low) parts.push(`${counts.low} low`);
+  const word = findings.length === 1 ? "finding" : "findings";
+  return `${findings.length} ${word}: ${parts.join(", ")}.`;
 }
 
 function formatSize(bytes) {
