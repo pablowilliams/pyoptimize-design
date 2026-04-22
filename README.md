@@ -4,6 +4,10 @@ Design and specification repository for **PyOptimize**, a machine-learning-assis
 
 This repo contains the academic-style design report that specifies the full system: a seven-stage pipeline that combines deterministic static analysis, runtime profiling, and language-model reasoning behind a strict verifier, together with a dashboard for reviewing and triaging findings.
 
+## Live demo
+
+**[pablowilliams.github.io/pyoptimize-design](https://pablowilliams.github.io/pyoptimize-design/)** — upload a PDF containing Python code and get a 0–100 quality score, a letter grade, grouped findings by rule, and inline highlights over the extracted text. Analysis runs entirely in your browser; no file leaves the page. See [`docs/`](docs/) for the site source.
+
 ## Contents
 
 | File | Description |
