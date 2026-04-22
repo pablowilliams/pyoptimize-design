@@ -45,6 +45,10 @@ Every run of PyOptimize produces:
 
 See section 5 of the report for the full dashboard specification, including accessibility requirements that target WCAG AA.
 
+## Continuous integration
+
+A GitHub Actions workflow at `.github/workflows/build-pdf.yml` rebuilds the PDF on every push to `main` that touches `report.md`, `figures.py`, or `build_pdf.py`. The workflow installs `reportlab`, runs `build_pdf.py`, verifies the rendered PDF has the expected page count and metadata, uploads it as a build artifact, and commits the regenerated PDF back to `main` if it has changed. The workflow can also be triggered manually via the Actions tab.
+
 ## Status
 
 This repository currently contains the design specification only. Implementation follows the four-week roadmap described in section 7 of the report.

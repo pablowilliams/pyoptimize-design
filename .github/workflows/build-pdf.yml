@@ -1,0 +1,65 @@
+name: Build PDF
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - report.md
+      - figures.py
+      - build_pdf.py
+      - .github/workflows/build-pdf.yml
+  pull_request:
+    paths:
+      - report.md
+      - figures.py
+      - build_pdf.py
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: python -m pip install --upgrade pip reportlab pypdf
+
+      - name: Build PDF
+        run: python build_pdf.py
+
+      - name: Verify PDF structure
+        run: |
+          python - <<'PY'
+          from pypdf import PdfReader
+          r = PdfReader("PyOptimize_Design_Report.pdf")
+          assert len(r.pages) >= 12, f"expected >= 12 pages, got {len(r.pages)}"
+          assert r.metadata.title, "PDF is missing a title"
+          print(f"OK: {len(r.pages)} pages, title={r.metadata.title!r}")
+          PY
+
+      - name: Upload PDF artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: PyOptimize_Design_Report
+          path: PyOptimize_Design_Report.pdf
+          if-no-files-found: error
+
+      - name: Commit regenerated PDF
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          if ! git diff --quiet PyOptimize_Design_Report.pdf; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add PyOptimize_Design_Report.pdf
+            git commit -m "ci: rebuild PDF from report source"
+            git push
+          else
+            echo "PDF unchanged; no commit needed."
+          fi
